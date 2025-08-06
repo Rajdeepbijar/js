@@ -1,47 +1,41 @@
-// server.js
-const WebSocket = require('ws');
-const http = require('http');
+const WebSocket = require("ws");
+const axios = require("axios");
 
-// Create HTTP server (needed for WebSocket upgrade)
-const server = http.createServer();
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ port: process.env.PORT || 10000 });
 
-const clients = new Set();
+const MATCH_ID = "894933367"; // Default match ID
+const API_URL = `http://165.232.181.130:4040/api-v3/TzLWM23fPgqZe/${MATCH_ID}`;
+const PUSH_INTERVAL = 3000; // 3 seconds
 
-wss.on('connection', (ws) => {
-  console.log('Client connected');
-  clients.add(ws);
+let clients = [];
 
-  ws.on('close', () => {
-    console.log('Client disconnected');
-    clients.delete(ws);
+wss.on("connection", (ws) => {
+  clients.push(ws);
+  ws.on("close", () => {
+    clients = clients.filter((c) => c !== ws);
   });
 });
 
-// Example: push odds data every 5 seconds
-setInterval(() => {
-  const oddsUpdate = {
-    type: "odds_update",
-    matchId: 894933367,
-    market: "MATCH_ODDS",
-    runners: [
-      { name: "Team A", back: 1.91, lay: 2.00 },
-      { name: "Team B", back: 1.92, lay: 2.02 },
-      { name: "Draw", back: 3.5, lay: 3.7 }
-    ],
-    timestamp: new Date().toISOString()
-  };
+async function fetchAndBroadcastOdds() {
+  try {
+    const res = await axios.get(API_URL);
+    const markets = res.data?.data?.data || [];
 
-  const message = JSON.stringify(oddsUpdate);
+    const html = generateHTML(markets); // You’ll write this part manually or load template
 
-  for (const client of clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
+    const payload = JSON.stringify({
+      match_id: MATCH_ID,
+      markets_html: html,
+    });
+
+    clients.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+      }
+    });
+  } catch (err) {
+    console.error("Fetch error:", err.message);
   }
-}, 5000);
+}
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`WebSocket server running on port ${PORT}`);
-});
+setInterval(fetchAndBroadcastOdds, PUSH_INTERVAL);
